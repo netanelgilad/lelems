@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lelems",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "lelems.dev",
+      "custom_domain": true
+    }
+  ],
+  "secrets": {
+    "required": ["KEY_ENCRYPTION_SECRET"]
+  },
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lelems-db",
+      "database_id": "858e17a9-99b4-4f4b-b969-835be6a68140"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LELEM",
+        "class_name": "Lelem"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Lelem"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  }
+}
