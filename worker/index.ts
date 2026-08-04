@@ -165,6 +165,7 @@ const LOOP_DELAY_MS = 3_000;
 const ERROR_RETRY_MS = 20_000;
 const LOOP_PROMPT = "Continue.";
 const MAX_MODEL_CONTEXT_TURNS = 24;
+const MAX_OUTPUT_TOKENS_PER_TURN = 4_096;
 const TRANSCRIPT_PAGE_SIZE = 200;
 const KEY_EXPIRY_SAFETY_MS = 120_000;
 
@@ -773,6 +774,7 @@ export class Lelem extends DurableObject<RuntimeEnv> {
           reasoning: { enabled: true, effort: "medium", exclude: false },
         }),
         instructions: meta.system_prompt,
+        maxOutputTokens: MAX_OUTPUT_TOKENS_PER_TURN,
         stopWhen: isLoopFinished(),
       });
       const result = await agent.stream({
