@@ -78,10 +78,12 @@ export type LelemSnapshot = TranscriptPage & {
   };
   budget: {
     remaining: number;
+    allowanceRemaining: number;
     initial: number;
     spent: number;
     contributors: number;
     activeKeys: number;
+    unavailableKeys: number;
     expiredKeys: number;
     nextExpiration: string | null;
   };

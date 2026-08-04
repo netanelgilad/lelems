@@ -82,13 +82,27 @@ export async function claimLocalOwner(idOrSlug: string, currentToken: string | n
 
 export async function controlLelem(
   idOrSlug: string,
-  action: "pause" | "resume",
+  action: "pause" | "resume" | "clear-history",
   ownerToken: string,
 ): Promise<LelemSnapshot> {
   return (
     await request<{ snapshot: LelemSnapshot }>(`/api/lelems/${encodeURIComponent(idOrSlug)}/${action}`, {
       method: "POST",
       headers: { authorization: `Bearer ${ownerToken}` },
+    })
+  ).snapshot;
+}
+
+export async function updateSystemPrompt(
+  idOrSlug: string,
+  systemPrompt: string,
+  ownerToken: string,
+): Promise<LelemSnapshot> {
+  return (
+    await request<{ snapshot: LelemSnapshot }>(`/api/lelems/${encodeURIComponent(idOrSlug)}/system-prompt`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${ownerToken}` },
+      body: JSON.stringify({ systemPrompt }),
     })
   ).snapshot;
 }

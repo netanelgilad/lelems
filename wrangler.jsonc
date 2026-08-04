@@ -20,7 +20,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "lelems-db"
+      "database_name": "lelems-db",
+      "database_id": "858e17a9-99b4-4f4b-b969-835be6a68140"
     }
   ],
   "durable_objects": {

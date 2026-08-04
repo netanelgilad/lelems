@@ -115,10 +115,12 @@ type PublicSnapshot = {
   };
   budget: {
     remaining: number;
+    allowanceRemaining: number;
     initial: number;
     spent: number;
     contributors: number;
     activeKeys: number;
+    unavailableKeys: number;
     expiredKeys: number;
     nextExpiration: string | null;
   };
@@ -165,7 +167,6 @@ const LOOP_DELAY_MS = 3_000;
 const ERROR_RETRY_MS = 20_000;
 const LOOP_PROMPT = "Continue.";
 const MAX_MODEL_CONTEXT_TURNS = 24;
-const MAX_OUTPUT_TOKENS_PER_TURN = 4_096;
 const TRANSCRIPT_PAGE_SIZE = 200;
 const KEY_EXPIRY_SAFETY_MS = 120_000;
 
@@ -237,6 +238,14 @@ function parseStoredJson(value: string | null): unknown {
 
 function redactSensitiveText(value: string): string {
   return value.replace(/sk-or-[A-Za-z0-9_-]+/g, "[redacted OpenRouter key]");
+}
+
+function getErrorStatusCode(value: unknown, depth = 0): number | null {
+  if (depth > 2 || typeof value !== "object" || value === null) return null;
+  const error = value as { statusCode?: unknown; status?: unknown; cause?: unknown };
+  if (typeof error.statusCode === "number") return error.statusCode;
+  if (typeof error.status === "number") return error.status;
+  return getErrorStatusCode(error.cause, depth + 1);
 }
 
 function normalizeExpiration(value: string | null | undefined): string | null {
@@ -524,6 +533,40 @@ export class Lelem extends DurableObject<RuntimeEnv> {
     return snapshot;
   }
 
+  async updateSystemPrompt(systemPrompt: string): Promise<PublicSnapshot> {
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      "UPDATE meta SET system_prompt = ?, updated_at = ?",
+      systemPrompt,
+      now,
+    );
+    const snapshot = this.getSnapshot();
+    this.broadcast(snapshot);
+    await this.syncDirectory(snapshot);
+    return snapshot;
+  }
+
+  async clearHistory(): Promise<PublicSnapshot> {
+    const meta = this.ctx.storage.sql.exec<MetaRow>("SELECT * FROM meta LIMIT 1").one();
+    if (meta.status !== "paused") throw new Error("Pause this Lelem before clearing its history.");
+
+    const now = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec("DELETE FROM transcript");
+      this.ctx.storage.sql.exec("DELETE FROM turns");
+      this.ctx.storage.sql.exec("DELETE FROM conversation_turns");
+      this.ctx.storage.sql.exec(
+        "UPDATE meta SET total_tokens = 0, turn_count = 0, updated_at = ?",
+        now,
+      );
+    });
+
+    const snapshot = this.getSnapshot();
+    this.broadcast(snapshot);
+    await this.syncDirectory(snapshot);
+    return snapshot;
+  }
+
   private publicTranscriptPage(beforeId?: number): PublicTranscriptPage {
     const rows = beforeId
       ? this.ctx.storage.sql
@@ -590,20 +633,24 @@ export class Lelem extends DurableObject<RuntimeEnv> {
       .exec<{
         initial: number;
         remaining: number;
+        allowance_remaining: number;
         spent: number;
         contributors: number;
         active_keys: number;
+        unavailable_keys: number;
         expired_keys: number;
         next_expiration: string | null;
       }>(
         `SELECT
           COALESCE(SUM(initial_budget), 0) AS initial,
           COALESCE(SUM(CASE WHEN status = 'active' THEN remaining ELSE 0 END), 0) AS remaining,
+          COALESCE(SUM(CASE WHEN status IN ('active', 'unavailable') THEN remaining ELSE 0 END), 0) AS allowance_remaining,
           COALESCE(SUM(spent), 0) AS spent,
           COUNT(*) AS contributors,
           COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) AS active_keys,
+          COALESCE(SUM(CASE WHEN status = 'unavailable' THEN 1 ELSE 0 END), 0) AS unavailable_keys,
           COALESCE(SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END), 0) AS expired_keys,
-          MIN(CASE WHEN status = 'active' THEN expires_at END) AS next_expiration
+          MIN(CASE WHEN status IN ('active', 'unavailable') THEN expires_at END) AS next_expiration
          FROM donated_keys`,
       )
       .one();
@@ -622,10 +669,12 @@ export class Lelem extends DurableObject<RuntimeEnv> {
       },
       budget: {
         remaining: roundMoney(budget.remaining),
+        allowanceRemaining: roundMoney(budget.allowance_remaining),
         initial: roundMoney(budget.initial),
         spent: roundMoney(budget.spent),
         contributors: budget.contributors,
         activeKeys: budget.active_keys,
+        unavailableKeys: budget.unavailable_keys,
         expiredKeys: budget.expired_keys,
         nextExpiration: budget.next_expiration,
       },
@@ -774,7 +823,6 @@ export class Lelem extends DurableObject<RuntimeEnv> {
           reasoning: { enabled: true, effort: "medium", exclude: false },
         }),
         instructions: meta.system_prompt,
-        maxOutputTokens: MAX_OUTPUT_TOKENS_PER_TURN,
         stopWhen: isLoopFinished(),
       });
       const result = await agent.stream({
@@ -1058,6 +1106,7 @@ export class Lelem extends DurableObject<RuntimeEnv> {
       else await this.ctx.storage.setAlarm(Date.now() + LOOP_DELAY_MS);
     } catch (error) {
       this.currentGeneration = null;
+      const insufficientCredits = getErrorStatusCode(error) === 402;
       const message = redactSensitiveText(error instanceof Error ? error.message : "Unknown generation error");
       console.error(JSON.stringify({ event: "lelem_generation_failed", lelemId: meta.id, message }));
       const failedAt = new Date().toISOString();
@@ -1085,23 +1134,33 @@ export class Lelem extends DurableObject<RuntimeEnv> {
           this.ctx.storage.sql.exec(
             "UPDATE donated_keys SET remaining = ?, status = ? WHERE id = ?",
             remaining,
-            remaining > 0 ? "active" : "depleted",
+            insufficientCredits ? "unavailable" : remaining > 0 ? "active" : "depleted",
             key.id,
           );
         } catch (keyError) {
-          if (keyError instanceof Error && keyError.message.includes("rejected")) {
+          if (insufficientCredits) {
+            this.ctx.storage.sql.exec("UPDATE donated_keys SET status = 'unavailable' WHERE id = ?", key.id);
+          } else if (keyError instanceof Error && keyError.message.includes("rejected")) {
             this.ctx.storage.sql.exec("UPDATE donated_keys SET status = 'invalid' WHERE id = ?", key.id);
           }
         }
       }
       const wasPaused = this.ctx.storage.sql.exec<{ status: LelemStatus }>("SELECT status FROM meta LIMIT 1").one().status === "paused";
       if (!wasPaused) {
-        this.ctx.storage.sql.exec("UPDATE meta SET status = 'error', updated_at = ?", new Date().toISOString());
+        const hasUsableKey = insufficientCredits && this.ctx.storage.sql
+          .exec<{ count: number }>("SELECT COUNT(*) AS count FROM donated_keys WHERE status = 'active' AND remaining > 0")
+          .one().count > 0;
+        this.ctx.storage.sql.exec(
+          "UPDATE meta SET status = ?, updated_at = ?",
+          insufficientCredits ? hasUsableKey ? "running" : "awaiting_budget" : "error",
+          new Date().toISOString(),
+        );
       }
       const snapshot = this.getSnapshot();
       this.broadcast(snapshot);
       await this.syncDirectory(snapshot);
-      if (wasPaused) await this.ctx.storage.deleteAlarm();
+      if (wasPaused || (insufficientCredits && snapshot.budget.activeKeys === 0)) await this.ctx.storage.deleteAlarm();
+      else if (insufficientCredits) await this.ctx.storage.setAlarm(Date.now() + 250);
       else await this.ctx.storage.setAlarm(Date.now() + ERROR_RETRY_MS);
     }
   }
@@ -1148,7 +1207,7 @@ export class Lelem extends DurableObject<RuntimeEnv> {
   private expireUnusableKeys(now = Date.now()): void {
     const cutoff = new Date(now + KEY_EXPIRY_SAFETY_MS).toISOString();
     this.ctx.storage.sql.exec(
-      "UPDATE donated_keys SET status = 'expired' WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= ?",
+      "UPDATE donated_keys SET status = 'expired' WHERE status IN ('active', 'unavailable') AND expires_at IS NOT NULL AND expires_at <= ?",
       cutoff,
     );
   }
@@ -1203,10 +1262,11 @@ export class Lelem extends DurableObject<RuntimeEnv> {
       .find((event) => event.role === "assistant" && event.kind === "message")?.content ?? null;
     try {
       await this.env.DB.prepare(
-        `UPDATE lelems SET status = ?, budget_remaining = ?, total_spent = ?, total_tokens = ?,
+        `UPDATE lelems SET system_prompt = ?, status = ?, budget_remaining = ?, total_spent = ?, total_tokens = ?,
          turn_count = ?, last_message = ?, updated_at = ? WHERE id = ?`,
       )
         .bind(
+          snapshot.lelem.systemPrompt,
           snapshot.lelem.status,
           snapshot.budget.remaining,
           snapshot.budget.spent,
@@ -1324,12 +1384,25 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
       return json({ ownerToken }, { status: 201 });
     }
 
-    if (request.method === "POST" && (parts[3] === "pause" || parts[3] === "resume")) {
+    if (request.method === "POST" && (parts[3] === "pause" || parts[3] === "resume" || parts[3] === "clear-history")) {
       if (!(await isValidControlToken(bearerToken(request), row.owner_token_hash))) {
         return apiError("Owner control token is missing or invalid.", 403);
       }
-      const snapshot = parts[3] === "pause" ? await stub.pause() : await stub.resume();
+      const snapshot = parts[3] === "pause"
+        ? await stub.pause()
+        : parts[3] === "resume"
+          ? await stub.resume()
+          : await stub.clearHistory();
       return json({ snapshot });
+    }
+
+    if (request.method === "PATCH" && parts[3] === "system-prompt") {
+      if (!(await isValidControlToken(bearerToken(request), row.owner_token_hash))) {
+        return apiError("Owner control token is missing or invalid.", 403);
+      }
+      const body = await readJson(request);
+      const systemPrompt = cleanString(body.systemPrompt, "System prompt", 8_000);
+      return json({ snapshot: await stub.updateSystemPrompt(systemPrompt) });
     }
 
   }
