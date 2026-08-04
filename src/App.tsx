@@ -262,7 +262,17 @@ function CreateDialog({ open, onClose }: { open: boolean; onClose: () => void })
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="lelem-name">Name</FieldLabel>
-              <Input id="lelem-name" autoFocus required maxLength={60} value={name} onChange={(event) => setName(event.target.value)} placeholder="The Night Gardener" />
+              <Input
+                id="lelem-name"
+                name="lelem_name"
+                autoComplete="nickname"
+                autoFocus
+                required
+                maxLength={60}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="The Night Gardener"
+              />
             </Field>
             <Field>
               <FieldLabel htmlFor="lelem-prompt">System prompt</FieldLabel>
