@@ -459,7 +459,7 @@ function TranscriptEventView({ event, streaming }: { event: TranscriptEvent; str
     return (
       <Card size="sm">
         <CardHeader><CardTitle>Agent loop input</CardTitle><CardAction><EventMeta event={event} /></CardAction></CardHeader>
-        <CardContent><CodeBlock code={event.content} language="text" /></CardContent>
+        <CardContent><CodeBlock code={event.content} language="markdown" /></CardContent>
       </Card>
     );
   }
