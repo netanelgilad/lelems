@@ -1,4 +1,4 @@
-import { FormEvent, Fragment, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIcon,
   AlertCircleIcon,
@@ -6,6 +6,7 @@ import {
   ArrowRightIcon,
   BotIcon,
   CircleDollarSignIcon,
+  ChevronRightIcon,
   Clock3Icon,
   DatabaseIcon,
   ExternalLinkIcon,
@@ -43,6 +44,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -417,11 +419,11 @@ function DonateDialog({ open, lelem, onClose, onSuccess }: { open: boolean; lele
 
 function EventMeta({ event }: { event: TranscriptEvent }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Badge variant="outline" className="font-mono">#{String(event.id).padStart(4, "0")}</Badge>
-      {event.stepNumber != null && <Badge variant="secondary">Step {event.stepNumber + 1}</Badge>}
-      <time className="ml-auto text-xs text-muted-foreground" dateTime={event.createdAt}>{relativeTime(event.createdAt)}</time>
-    </div>
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+      <span>#{String(event.id).padStart(4, "0")}</span>
+      {event.stepNumber != null && <span>Step {event.stepNumber + 1}</span>}
+      <time dateTime={event.createdAt}>{relativeTime(event.createdAt)}</time>
+    </span>
   );
 }
 
@@ -441,86 +443,82 @@ function TranscriptEventView({ event, streaming }: { event: TranscriptEvent; str
 
   if (event.kind === "message") {
     return (
-      <Message from="assistant" className="max-w-none gap-3">
+      <Message from="assistant" className="max-w-none gap-1.5">
         <EventMeta event={event} />
         <MessageContent className="w-full">
           <MessageResponse isAnimating={streaming}>{event.content || (streaming ? "Receiving…" : "")}</MessageResponse>
         </MessageContent>
-        {streaming && <Badge variant="secondary" className="w-fit"><Spinner /> Streaming</Badge>}
+        {streaming && <span className="shimmer text-xs text-muted-foreground">Streaming response…</span>}
       </Message>
     );
   }
 
   if (event.kind === "reasoning") {
     return (
-      <Card size="sm">
-        <CardHeader><EventMeta event={event} /></CardHeader>
-        <CardContent>
-          <Reasoning isStreaming={streaming} defaultOpen>
-            <ReasoningTrigger />
-            <ReasoningContent>{event.content || (streaming ? "Receiving reasoning…" : "No reasoning text returned by the provider.")}</ReasoningContent>
-          </Reasoning>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (event.kind === "loop-prompt") {
-    return (
-      <Card size="sm">
-        <CardHeader><CardTitle>Agent loop input</CardTitle><CardAction><EventMeta event={event} /></CardAction></CardHeader>
-        <CardContent><CodeBlock code={event.content} language="markdown" /></CardContent>
-      </Card>
+      <div className="flex flex-col gap-1.5">
+        <EventMeta event={event} />
+        <Reasoning isStreaming={streaming} defaultOpen={streaming} className="mb-0">
+          <ReasoningTrigger />
+          <ReasoningContent className="mt-2">{event.content || (streaming ? "Receiving reasoning…" : "No reasoning text returned by the provider.")}</ReasoningContent>
+        </Reasoning>
+      </div>
     );
   }
 
   if (event.kind === "tool-call" || event.kind === "tool-result" || event.kind === "tool-error") {
     return (
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><TerminalIcon className="size-4" />{event.toolName ?? "Unknown tool"}</CardTitle>
-          <CardDescription>{event.kind.replace("-", " ")}{event.toolCallId ? ` · ${event.toolCallId}` : ""}</CardDescription>
-          <CardAction><EventMeta event={event} /></CardAction>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+      <Collapsible className="group/activity">
+        <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground">
+          <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]/activity:rotate-90" />
+          <TerminalIcon className="size-3.5 shrink-0" />
+          <span className="font-medium text-foreground">{event.toolName ?? "Unknown tool"}</span>
+          <span>{event.kind === "tool-call" ? "called" : event.kind === "tool-result" ? "returned" : "failed"}</span>
+          <EventMeta event={event} />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-2 pt-2">
           {event.input != null && <DataBlock label="Input" value={event.input} />}
           {event.output != null && <DataBlock label={event.kind === "tool-error" ? "Error" : "Output"} value={event.output} />}
-        </CardContent>
-      </Card>
+        </CollapsibleContent>
+      </Collapsible>
     );
   }
 
   if (event.kind === "step") {
     return (
-      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-        <Badge variant="outline">{event.content}</Badge>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1 font-mono text-[10px] text-muted-foreground">
+        <span className="font-sans font-medium text-foreground">{event.content}</span>
         <span>{formatNumber(Number(output?.inputTokens ?? 0))} in</span>
         <span>{formatNumber(Number(output?.outputTokens ?? 0))} out</span>
-        <span>{formatNumber(Number(output?.reasoningTokens ?? 0))} reasoning</span>
+        {Number(output?.reasoningTokens ?? 0) > 0 && <span>{formatNumber(Number(output?.reasoningTokens ?? 0))} reasoning</span>}
         <span>{String(output?.finishReason ?? "")}</span>
-        <span className="ml-auto">{formatDuration(Number(output?.durationMs ?? 0))}</span>
+        <span>{formatDuration(Number(output?.durationMs ?? 0))}</span>
       </div>
     );
   }
 
   return (
-    <Card size="sm">
-      <CardHeader><CardTitle className="capitalize">{event.kind.replace("-", " ")}</CardTitle><CardAction><EventMeta event={event} /></CardAction></CardHeader>
-      <CardContent className="flex flex-col gap-3"><p className="text-sm leading-relaxed">{event.content}</p>{event.output != null && <DataBlock label="Output" value={event.output} />}</CardContent>
-    </Card>
+    <Collapsible className="group/activity">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground">
+        <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]/activity:rotate-90" />
+        <span className="font-medium capitalize text-foreground">{event.kind.replace("-", " ")}</span>
+        <span className="truncate">{event.content}</span>
+        <EventMeta event={event} />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col gap-2 pt-2"><p className="text-sm leading-relaxed">{event.content}</p>{event.output != null && <DataBlock label="Output" value={event.output} />}</CollapsibleContent>
+    </Collapsible>
   );
 }
 
 function TurnSummary({ turn }: { turn: LelemTurn }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 text-xs text-muted-foreground">
-      <Badge variant={turn.status === "running" ? "default" : "secondary"}>Turn {turn.id.slice(0, 8).toUpperCase()}</Badge>
-      <span className="font-mono">{turn.model}</span>
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2 font-mono text-[10px] text-muted-foreground">
+      <span className="font-sans font-medium text-foreground">Turn {turn.id.slice(0, 8).toUpperCase()}</span>
+      <span className="max-w-48 truncate" title={turn.model}>{turn.model}</span>
       <span>{formatNumber(turn.inputTokens)} in</span>
       <span>{formatNumber(turn.outputTokens)} out</span>
-      <span>{formatNumber(turn.reasoningTokens)} reasoning</span>
+      {turn.reasoningTokens > 0 && <span>{formatNumber(turn.reasoningTokens)} reasoning</span>}
       <span>{formatMoney(turn.cost)}</span>
-      <span className="ml-auto">{turn.status === "running" ? "Streaming" : `${turn.finishReason ?? turn.status} · ${formatDuration(turn.durationMs)}`}</span>
+      <span>{turn.status === "running" ? "streaming" : `${turn.finishReason ?? turn.status} · ${formatDuration(turn.durationMs)}`}</span>
     </div>
   );
 }
@@ -620,6 +618,7 @@ function LivePage({ slug }: { slug: string }) {
 
   const budgetPercent = useMemo(() => !snapshot?.budget.initial ? 0 : Math.min(100, Math.max(0, (snapshot.budget.allowanceRemaining / snapshot.budget.initial) * 100)), [snapshot]);
   const turnMap = useMemo(() => new Map(snapshot?.turns.map((turn) => [turn.id, turn]) ?? []), [snapshot?.turns]);
+  const publicTranscript = useMemo(() => snapshot?.transcript.filter((event) => event.kind !== "loop-prompt") ?? [], [snapshot?.transcript]);
 
   if (error) return <div className="min-h-svh"><Header /><main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-24"><Badge variant="destructive">Signal lost</Badge><h1 className="text-3xl font-semibold">{error}</h1><Button variant="outline" className="w-fit" onClick={() => navigate("/")}><ArrowLeftIcon data-icon="inline-start" />Back to directory</Button></main></div>;
   if (!snapshot) return <div className="min-h-svh"><Header /><main className="mx-auto max-w-7xl px-4 py-12"><div className="grid gap-6 lg:grid-cols-[1fr_22rem]"><div className="flex flex-col gap-4"><Skeleton className="h-10 w-40" /><Skeleton className="h-24" /><Skeleton className="h-96" /></div><Skeleton className="h-96" /></div></main></div>;
@@ -637,29 +636,43 @@ function LivePage({ slug }: { slug: string }) {
             </div>
             <Card size="sm"><CardHeader><CardTitle>System prompt</CardTitle></CardHeader><CardContent><p className="text-sm leading-relaxed text-muted-foreground">{snapshot.lelem.systemPrompt}</p></CardContent></Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Public transcript</CardTitle>
-                <CardDescription>{snapshot.totals.turns} turns · {snapshot.transcript.length} events · {formatNumber(snapshot.totals.tokens)} tokens</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-5">
+            <section aria-labelledby="public-transcript-heading">
+              <div className="flex flex-wrap items-end justify-between gap-3 border-b pb-4">
+                <div className="flex flex-col gap-1">
+                  <h2 id="public-transcript-heading" className="text-lg font-semibold">Live loop</h2>
+                  <p className="text-xs text-muted-foreground">A continuous public record of this agent’s work.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <span>{snapshot.totals.turns} turns</span>
+                  <span>{formatNumber(snapshot.totals.tokens)} tokens</span>
+                </div>
+              </div>
+              <div className="flex flex-col pt-4">
                 {historyError && <ErrorAlert title="Could not load history" message={historyError} />}
-                {snapshot.hasMoreTranscript && <Button variant="outline" onClick={loadEarlier} disabled={loadingEarlier}>{loadingEarlier ? <Spinner data-icon="inline-start" /> : <HistoryIcon data-icon="inline-start" />}{loadingEarlier ? "Loading…" : "Load earlier events"}</Button>}
-                {snapshot.transcript.length ? snapshot.transcript.map((entry, index) => {
+                {snapshot.hasMoreTranscript && <Button size="sm" variant="ghost" className="mb-3 w-fit" onClick={loadEarlier} disabled={loadingEarlier}>{loadingEarlier ? <Spinner data-icon="inline-start" /> : <HistoryIcon data-icon="inline-start" />}{loadingEarlier ? "Loading…" : "Load earlier events"}</Button>}
+                {publicTranscript.length ? publicTranscript.map((entry, index) => {
                   const turn = entry.turnId ? turnMap.get(entry.turnId) : undefined;
-                  const next = snapshot.transcript[index + 1];
+                  const previous = publicTranscript[index - 1];
+                  const next = publicTranscript[index + 1];
+                  const opensTurn = Boolean(turn && previous?.turnId !== entry.turnId);
                   const closesTurn = Boolean(turn && next?.turnId !== entry.turnId);
                   const streaming = turn?.status === "running" && (entry.kind === "message" || entry.kind === "reasoning" || entry.kind === "tool-call");
-                  return <Fragment key={entry.id}><TranscriptEventView event={entry} streaming={streaming} />{closesTurn && turn && <TurnSummary turn={turn} />}<Separator /></Fragment>;
-                }) : (
+                  return (
+                    <div key={entry.id} className={cn("relative border-l pl-5", opensTurn && index > 0 && "mt-3", closesTurn ? "pb-4" : "pb-2")}>
+                      <span className={cn("absolute -left-1 top-2 size-2 rounded-full border bg-background", streaming && "bg-foreground")} aria-hidden="true" />
+                      <TranscriptEventView event={entry} streaming={streaming} />
+                      {closesTurn && turn && <TurnSummary turn={turn} />}
+                    </div>
+                  );
+                }) : snapshot.transcript.length === 0 ? (
                   <Empty>
                     <EmptyHeader><EmptyMedia variant="icon"><RadioIcon /></EmptyMedia><EmptyTitle>{snapshot.lelem.status === "paused" ? "Loop paused" : "Waiting for fuel"}</EmptyTitle><EmptyDescription>{snapshot.lelem.status === "paused" ? "Only the owner can restart this Lelem." : "This Lelem starts itself as soon as an OpenRouter budget is available."}</EmptyDescription></EmptyHeader>
                   </Empty>
-                )}
-                {snapshot.lelem.status === "thinking" && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner /><span className="shimmer">Streaming the next transmission</span></div>}
+                ) : null}
+                {snapshot.lelem.status === "thinking" && <div className="flex items-center gap-2 border-l py-2 pl-5 text-sm text-muted-foreground"><Spinner /><span className="shimmer">Streaming the next transmission</span></div>}
                 <div ref={endRef} />
-              </CardContent>
-            </Card>
+              </div>
+            </section>
           </div>
         </section>
 
@@ -668,7 +681,7 @@ function LivePage({ slug }: { slug: string }) {
             <CardHeader><CardTitle>Community fuel</CardTitle><CardDescription>Verified key spending allowance</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-5">
               <div><div className="text-3xl font-semibold tracking-tight">{formatMoney(snapshot.budget.allowanceRemaining)}</div><p className="text-xs text-muted-foreground">of {formatMoney(snapshot.budget.initial)} donated</p></div>
-              <div className="flex flex-col gap-2"><Progress value={budgetPercent} /><div className="flex justify-between text-xs text-muted-foreground"><span>{budgetPercent.toFixed(1)}% left</span><span>{formatMoney(snapshot.budget.spent)} spent</span></div></div>
+              <div className="flex flex-col gap-2"><Progress value={budgetPercent} aria-label="Remaining key allowance" /><div className="flex justify-between text-xs text-muted-foreground"><span>{budgetPercent.toFixed(1)}% left</span><span>{formatMoney(snapshot.budget.spent)} spent</span></div></div>
               <div className="grid grid-cols-2 gap-2">
                 <Stat label="Donated keys" value={snapshot.budget.contributors} icon={UsersIcon} />
                 <Stat label="Active keys" value={snapshot.budget.activeKeys} icon={KeyRoundIcon} />
