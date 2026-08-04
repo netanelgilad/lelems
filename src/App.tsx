@@ -52,7 +52,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { claimLocalOwner, controlLelem, createLelem, donateKey, getEarlierTranscript, getLelem, getOwnerToken, listLelems, storeOwnerToken } from "./api";
 import type { LelemSnapshot, LelemStatus, LelemSummary, LelemTurn, TranscriptEvent } from "./types";
@@ -208,7 +208,7 @@ function LelemCard({ lelem, index }: { lelem: LelemSummary; index: number }) {
       <CardContent className="flex-1">
         <div className="flex flex-col gap-2 rounded-lg bg-muted p-3">
           <span className="text-xs font-medium text-muted-foreground">Latest transmission</span>
-          <p className="line-clamp-3 text-sm leading-relaxed">{lelem.lastMessage ?? "Waiting for someone to fund its first transmission."}</p>
+          <MessageResponse className="line-clamp-3 text-sm leading-relaxed">{lelem.lastMessage ?? "Waiting for someone to fund its first transmission."}</MessageResponse>
         </div>
       </CardContent>
       <CardFooter className="justify-between">
@@ -459,7 +459,7 @@ function TranscriptEventView({ event, streaming }: { event: TranscriptEvent; str
     return (
       <Card size="sm">
         <CardHeader><CardTitle>Agent loop input</CardTitle><CardAction><EventMeta event={event} /></CardAction></CardHeader>
-        <CardContent><CodeBlock code={event.content} language="text" /></CardContent>
+        <CardContent><CodeBlock code={event.content} language="markdown" /></CardContent>
       </Card>
     );
   }
@@ -634,7 +634,7 @@ function LivePage({ slug }: { slug: string }) {
               </CardHeader>
               <CardContent className="flex flex-col gap-5">
                 {historyError && <ErrorAlert title="Could not load history" message={historyError} />}
-                {snapshot.hasMoreTranscript && <Button variant="outline" onClick={loadEarlier} disabled={loadingEarlier}>{loadingEarlier && <Spinner data-icon="inline-start" />}<HistoryIcon data-icon="inline-start" />{loadingEarlier ? "Loading…" : "Load earlier events"}</Button>}
+                {snapshot.hasMoreTranscript && <Button variant="outline" onClick={loadEarlier} disabled={loadingEarlier}>{loadingEarlier ? <Spinner data-icon="inline-start" /> : <HistoryIcon data-icon="inline-start" />}{loadingEarlier ? "Loading…" : "Load earlier events"}</Button>}
                 {snapshot.transcript.length ? snapshot.transcript.map((entry, index) => {
                   const turn = entry.turnId ? turnMap.get(entry.turnId) : undefined;
                   const next = snapshot.transcript[index + 1];
@@ -669,16 +669,16 @@ function LivePage({ slug }: { slug: string }) {
               {snapshot.budget.expiredKeys > 0 && <Alert variant="destructive"><AlertCircleIcon /><AlertTitle>{snapshot.budget.expiredKeys} expired {snapshot.budget.expiredKeys === 1 ? "key" : "keys"}</AlertTitle><AlertDescription>Expired keys are excluded from available fuel.</AlertDescription></Alert>}
               {snapshot.budget.unavailableKeys > 0 && <Alert variant="destructive"><AlertCircleIcon /><AlertTitle>{snapshot.budget.unavailableKeys} unavailable {snapshot.budget.unavailableKeys === 1 ? "key" : "keys"}</AlertTitle><AlertDescription>OpenRouter rejected a generation for insufficient credits.</AlertDescription></Alert>}
 
-              {ownerToken && <Card size="sm"><CardHeader><CardTitle>Owner control</CardTitle><CardDescription>{snapshot.lelem.status === "paused" ? "Loop paused" : "Loop armed"}</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-2">
+              {ownerToken && <Alert><KeyRoundIcon /><AlertTitle>Owner control</AlertTitle><AlertDescription><p>{snapshot.lelem.status === "paused" ? "Loop paused" : "Loop armed"}</p><div className="mt-3 flex flex-wrap gap-2">
                 {snapshot.lelem.status === "paused" ? <Button onClick={() => changeRunningState("resume")} disabled={ownerBusy}><PlayIcon data-icon="inline-start" />Resume</Button> : <Button variant="outline" onClick={() => changeRunningState("pause")} disabled={ownerBusy}><PauseIcon data-icon="inline-start" />Pause</Button>}
                 <AlertDialog>
-                  <Tooltip><TooltipTrigger asChild><AlertDialogTrigger asChild><Button variant="destructive" disabled={ownerBusy || snapshot.lelem.status !== "paused"}><Trash2Icon data-icon="inline-start" />Clear history</Button></AlertDialogTrigger></TooltipTrigger><TooltipContent>{snapshot.lelem.status === "paused" ? "Clear transcript and model history" : "Pause the Lelem before clearing history"}</TooltipContent></Tooltip>
+                  <AlertDialogTrigger asChild><Button variant="destructive" disabled={ownerBusy || snapshot.lelem.status !== "paused"} title={snapshot.lelem.status === "paused" ? "Clear transcript and model history" : "Pause the Lelem before clearing history"}><Trash2Icon data-icon="inline-start" />Clear history</Button></AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader><AlertDialogMedia><Trash2Icon /></AlertDialogMedia><AlertDialogTitle>Clear this Lelem’s history?</AlertDialogTitle><AlertDialogDescription>This permanently clears the public transcript and model conversation history. Donated keys and budget history are kept.</AlertDialogDescription></AlertDialogHeader>
                     <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={clearHistory}>Clear history</AlertDialogAction></AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
-              </CardContent></Card>}
+              </div></AlertDescription></Alert>}
               {ownerError && <ErrorAlert title="Owner control failed" message={ownerError} />}
             </CardContent>
             <CardFooter className="flex-col items-stretch gap-3">
